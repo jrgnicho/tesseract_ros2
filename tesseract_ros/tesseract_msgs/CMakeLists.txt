@@ -41,6 +41,8 @@ set(msg_files
     "msg/Link.msg"
     "msg/Material.msg"
     "msg/Mesh.msg"
+    "msg/PlanningRequest.msg"
+    "msg/PlanningResponse.msg"
     "msg/ObjectColor.msg"
     "msg/SceneGraph.msg"
     "msg/TesseractInitInfo.msg"
@@ -58,10 +60,23 @@ set(srv_files
     "srv/SaveSceneGraph.srv"
 )
 
+set(action_files
+	"action/GetMotionPlan.action"
+)
+
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}
   ${srv_files}
-  DEPENDENCIES std_msgs geometry_msgs sensor_msgs shape_msgs octomap_msgs trajectory_msgs)
+  ${action_files}
+  DEPENDENCIES
+   std_msgs
+   geometry_msgs
+   sensor_msgs
+   shape_msgs
+   octomap_msgs
+   trajectory_msgs
+   action_msgs
+   builtin_interfaces)
 
 ament_export_dependencies(rosidl_default_runtime)
 
