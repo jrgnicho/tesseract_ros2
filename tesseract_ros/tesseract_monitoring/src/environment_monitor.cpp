@@ -46,7 +46,7 @@ TESSERACT_COMMON_IGNORE_WARNINGS_PUSH
 //#include <tesseract_monitoring/EnvironmentMonitorDynamicReconfigureConfig.h>
 TESSERACT_COMMON_IGNORE_WARNINGS_POP
 #include <rclcpp/rclcpp.hpp>
-#include <tesseract_environment/kdl/kdl_env.h>
+//#include <tesseract_environment/kdl/kdl_env.h>
 #include <tesseract_environment/core/utils.h>
 #include <tesseract_monitoring/environment_monitor.h>
 #include <tesseract_kinematics/core/utils.h>
@@ -146,8 +146,8 @@ EnvironmentMonitor::EnvironmentMonitor(const std::string& name, rclcpp::Node::Sh
 
   node_->get_parameter_or<std::string>("discrete_plugin", discrete_plugin_name_, "");
   node_->get_parameter_or<std::string>("continuous_plugin", continuous_plugin_name_, "");
-  node_->get_parameter_or<std::string>("joint_state_topic", joint_state_topic_, "");
-  node_->get_parameter_or<std::string>("monitored_environment_topic", monitored_environment_topic_, "");
+  node_->get_parameter_or<std::string>("joint_state_topic", joint_state_topic_, DEFAULT_JOINT_STATES_TOPIC);
+  node_->get_parameter_or<std::string>("monitored_environment_topic", monitored_environment_topic_, MONITORED_ENVIRONMENT_TOPIC);
 
   std::string urdf_path, srdf_path;
   if (!node_->get_parameter(robot_description, urdf_path))
@@ -177,6 +177,7 @@ EnvironmentMonitor::EnvironmentMonitor(const std::string& name, rclcpp::Node::Sh
   initialize();
 }
 
+// TODO: Fix this constructor
 // EnvironmentMonitor::EnvironmentMonitor(tesseract::Tesseract::Ptr tesseract,
 //                                       const std::string& name,
 //                                       const std::string& discrete_plugin,
@@ -388,7 +389,7 @@ void EnvironmentMonitor::environmentPublishingThread()
     bool publish_msg = false;
     rclcpp::Rate rate(publish_environment_frequency_);
     {
-      std::unique_lock<boost::shared_mutex> ulock(scene_update_mutex_);
+      std::unique_lock<std::shared_mutex> ulock(scene_update_mutex_);
       while (new_environment_update_ == UPDATE_NONE && publish_environment_)
         new_environment_update_condition_.wait(ulock);
       if (new_environment_update_ != UPDATE_NONE)
@@ -444,7 +445,7 @@ void EnvironmentMonitor::newStateCallback(const std::shared_ptr<tesseract_msgs::
   EnvironmentUpdateType upd = UPDATE_ENVIRONMENT;
   std::string old_scene_name;
   {
-    boost::unique_lock<boost::shared_mutex> ulock(scene_update_mutex_);
+    std::unique_lock<std::shared_mutex> ulock(scene_update_mutex_);
 
     last_update_time_ = clock_->now();
     last_robot_motion_time_ = env->joint_state.header.stamp;
@@ -477,7 +478,7 @@ bool EnvironmentMonitor::applyEnvironmentCommandsMessage(
   EnvironmentUpdateType upd = UPDATE_ENVIRONMENT;
   std::string old_scene_name;
   {
-    boost::unique_lock<boost::shared_mutex> ulock(scene_update_mutex_);
+    std::unique_lock<std::shared_mutex> ulock(scene_update_mutex_);
     result = tesseract_rosutils::processMsg(*(tesseract_->getEnvironment()), commands);
   }
 
@@ -623,7 +624,7 @@ bool EnvironmentMonitor::waitForCurrentState(const rclcpp::Time& t, double wait_
   // Hence we need a timeout!
   // As publishing planning scene updates is throttled (2Hz by default), a 1s
   // timeout is a suitable default.
-  boost::shared_lock<boost::shared_mutex> lock(scene_update_mutex_);
+  std::shared_lock<std::shared_mutex> lock(scene_update_mutex_);
   rclcpp::Time prev_robot_motion_time = last_robot_motion_time_;
   while (last_robot_motion_time_ < t &&  // Wait until the state update actually reaches the scene.
          timeout > boost::chrono::duration<double>::zero())
@@ -653,10 +654,15 @@ bool EnvironmentMonitor::waitForCurrentState(const rclcpp::Time& t, double wait_
   return success;
 }
 
-void EnvironmentMonitor::lockEnvironmentRead() { scene_update_mutex_.lock_shared(); }
-void EnvironmentMonitor::unlockEnvironmentRead() { scene_update_mutex_.unlock_shared(); }
-void EnvironmentMonitor::lockEnvironmentWrite() { scene_update_mutex_.lock(); }
-void EnvironmentMonitor::unlockEnvironmentWrite() { scene_update_mutex_.unlock(); }
+std::shared_lock<std::shared_mutex> EnvironmentMonitor::lockEnvironmentRead()
+{
+  return std::shared_lock(scene_update_mutex_);
+}
+
+std::unique_lock<std::shared_mutex> EnvironmentMonitor::lockEnvironmentWrite()
+{
+  return std::unique_lock(scene_update_mutex_);
+}
 
 void EnvironmentMonitor::startStateMonitor(const std::string& joint_states_topic)
 {
@@ -665,7 +671,7 @@ void EnvironmentMonitor::startStateMonitor(const std::string& joint_states_topic
   {
     if (!current_state_monitor_)
       current_state_monitor_.reset(
-          new CurrentStateMonitor(tesseract_->getEnvironment(), tesseract_->getFwdKinematicsManager(), node_));
+          new CurrentStateMonitor(tesseract_->getEnvironment(), tesseract_->getManipulatorManager(), node_));
 
     current_state_monitor_->addUpdateCallback(boost::bind(&EnvironmentMonitor::onStateUpdate, this, _1));
     current_state_monitor_->startStateMonitor(joint_states_topic);
@@ -798,7 +804,7 @@ void EnvironmentMonitor::updateEnvironmentWithCurrentState()
     }
 
     {
-      boost::unique_lock<boost::shared_mutex> ulock(scene_update_mutex_);
+      std::unique_lock<std::shared_mutex> ulock(scene_update_mutex_);
       last_update_time_ = last_robot_motion_time_ = current_state_monitor_->getCurrentStateTime();
       RCLCPP_DEBUG(node_->get_logger(), "robot state update%f ", fmod(last_robot_motion_time_.seconds(), 10.));
 
@@ -836,7 +842,7 @@ void EnvironmentMonitor::modifyEnvironmentCallback(
     std::shared_ptr<tesseract_msgs::srv::ModifyEnvironment::Response> res)
 {
   res->success = applyEnvironmentCommandsMessage(req->id, static_cast<int>(req->revision), req->commands);
-  res->revision = static_cast<unsigned long>(tesseract_->getEnvironmentConst()->getRevision());
+  res->revision = static_cast<unsigned long>(tesseract_->getEnvironment()->getRevision());
 }
 
 void EnvironmentMonitor::getEnvironmentChangesCallback(
@@ -878,7 +884,7 @@ void EnvironmentMonitor::getEnvironmentInformationCallback(
 
   if (req->flags & tesseract_msgs::srv::GetEnvironmentInformation::Request::LINK_LIST)
   {
-    for (const auto& link : tesseract_->getEnvironmentConst()->getSceneGraph()->getLinks())
+    for (const auto& link : tesseract_->getEnvironment()->getSceneGraph()->getLinks())
     {
       tesseract_msgs::msg::Link msg;
       if (!tesseract_rosutils::toMsg(msg, *link))
@@ -892,7 +898,7 @@ void EnvironmentMonitor::getEnvironmentInformationCallback(
 
   if (req->flags & tesseract_msgs::srv::GetEnvironmentInformation::Request::JOINT_LIST)
   {
-    for (const auto& joint : tesseract_->getEnvironmentConst()->getSceneGraph()->getJoints())
+    for (const auto& joint : tesseract_->getEnvironment()->getSceneGraph()->getJoints())
     {
       tesseract_msgs::msg::Joint msg;
       if (!tesseract_rosutils::toMsg(msg, *joint))
@@ -906,7 +912,7 @@ void EnvironmentMonitor::getEnvironmentInformationCallback(
 
   if (req->flags & tesseract_msgs::srv::GetEnvironmentInformation::Request::LINK_NAMES)
   {
-    for (const auto& link : tesseract_->getEnvironmentConst()->getLinkNames())
+    for (const auto& link : tesseract_->getEnvironment()->getLinkNames())
     {
       res->link_names.push_back(link);
     }
@@ -914,7 +920,7 @@ void EnvironmentMonitor::getEnvironmentInformationCallback(
 
   if (req->flags & tesseract_msgs::srv::GetEnvironmentInformation::Request::JOINT_NAMES)
   {
-    for (const auto& joint : tesseract_->getEnvironmentConst()->getJointNames())
+    for (const auto& joint : tesseract_->getEnvironment()->getJointNames())
     {
       res->joint_names.push_back(joint);
     }
@@ -922,7 +928,7 @@ void EnvironmentMonitor::getEnvironmentInformationCallback(
 
   if (req->flags & tesseract_msgs::srv::GetEnvironmentInformation::Request::ACTIVE_LINK_NAMES)
   {
-    for (const auto& link : tesseract_->getEnvironmentConst()->getActiveLinkNames())
+    for (const auto& link : tesseract_->getEnvironment()->getActiveLinkNames())
     {
       res->active_link_names.push_back(link);
     }
@@ -930,7 +936,7 @@ void EnvironmentMonitor::getEnvironmentInformationCallback(
 
   if (req->flags & tesseract_msgs::srv::GetEnvironmentInformation::Request::ACTIVE_JOINT_NAMES)
   {
-    for (const auto& joint : tesseract_->getEnvironmentConst()->getActiveJointNames())
+    for (const auto& joint : tesseract_->getEnvironment()->getActiveJointNames())
     {
       res->active_joint_names.push_back(joint);
     }
@@ -938,7 +944,7 @@ void EnvironmentMonitor::getEnvironmentInformationCallback(
 
   if (req->flags & tesseract_msgs::srv::GetEnvironmentInformation::Request::LINK_TRANSFORMS)
   {
-    for (const auto& link_pair : tesseract_->getEnvironmentConst()->getCurrentState()->link_transforms)
+    for (const auto& link_pair : tesseract_->getEnvironment()->getCurrentState()->link_transforms)
     {
       res->link_transforms.names.push_back(link_pair.first);
       geometry_msgs::msg::Pose pose = tf2::toMsg(link_pair.second);

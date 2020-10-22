@@ -16,7 +16,6 @@ find_package(tf2_eigen REQUIRED)
 
 include_directories(
   include
-  ${catkin_INCLUDE_DIRS}
 )
 
 # Tesseract ROS Nodes

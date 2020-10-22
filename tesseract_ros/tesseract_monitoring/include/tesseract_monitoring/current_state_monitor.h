@@ -53,7 +53,8 @@ TESSERACT_COMMON_IGNORE_WARNINGS_POP
 
 #include <tesseract/tesseract.h>
 #include <tesseract_environment/core/environment.h>
-#include <tesseract/forward_kinematics_manager.h>
+#include <tesseract/manipulator_manager.h>
+//#include <tesseract/forward_kinematics_manager.h>
 
 namespace tesseract_monitoring
 {
@@ -78,7 +79,7 @@ public:
    *  @param nh A ros::NodeHandle to pass node specific options
    */
   CurrentStateMonitor(const tesseract_environment::Environment::ConstPtr& env,
-                      const tesseract::ForwardKinematicsManager::ConstPtr& kinematics_manager,
+                      tesseract::ManipulatorManager::ConstPtr manipulator_manager,
                       rclcpp::Node::SharedPtr node);
 
   ~CurrentStateMonitor();
@@ -183,7 +184,8 @@ private:
   tesseract_environment::Environment::ConstPtr env_;
   tesseract_environment::EnvState env_state_;
   int last_environment_revision_;
-  tesseract::ForwardKinematicsManager::ConstPtr kinematics_manager_;
+
+  tesseract::ManipulatorManager::ConstPtr manipulator_manager_;
   std::map<std::string, rclcpp::Time> joint_time_;
   bool state_monitor_started_;
   bool copy_dynamics_;  // Copy velocity and effort from joint_state

@@ -42,9 +42,6 @@ TESSERACT_COMMON_IGNORE_WARNINGS_PUSH
 #include <pluginlib/class_loader.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/service.hpp>
-//#include <tf/tf.h>
-//#include <tf/message_filter.h>
-//#include <message_filters/subscriber.h>
 
 #include <condition_variable>
 #include <shared_mutex>
@@ -157,7 +154,11 @@ public:
   {
     return tesseract_->getEnvironment()->getSceneGraph();
   }
-  const tesseract_scene_graph::SRDFModel::ConstPtr& getSRDF() const { return tesseract_->getSRDFModelConst(); }
+  tesseract_scene_graph::SRDFModel::ConstPtr getSRDF() const
+  {
+    return tesseract_->getManipulatorManager()->getSRDFModel();
+  }
+
   /** @brief <b>Avoid this function!</b>  Returns an @b
    *         unsafe pointer to the current planning scene.
    * @warning Most likely you do not want to call this function
@@ -173,12 +174,13 @@ public:
    * @see LockedPlanningSceneRW.
    * @return A pointer to the current planning scene.*/
   const tesseract_environment::Environment::Ptr& getEnvironment() { return tesseract_->getEnvironment(); }
+
   /*! @brief <b>Avoid this function!</b>  Returns an @b
    *         unsafe pointer to the current planning scene.
    * @copydetails PlanningSceneMonitor::getPlanningScene() */
-  const tesseract_environment::Environment::ConstPtr& getEnvironment() const
+  tesseract_environment::Environment::ConstPtr getEnvironment() const
   {
-    return tesseract_->getEnvironmentConst();
+    return tesseract_->getEnvironment();
   }
 
   /**
@@ -275,19 +277,13 @@ public:
    */
   bool waitForCurrentState(const rclcpp::Time& t, double wait_time = 1.);
 
-  /** \brief Lock the scene for reading (multiple threads can lock for reading at the same time) */
-  void lockEnvironmentRead();
 
-  /** \brief Unlock the scene from reading (multiple threads can lock for reading at the same time) */
-  void unlockEnvironmentRead();
+  /** \brief Lock the scene for reading (multiple threads can lock for reading at the same time) */
+  std::shared_lock<std::shared_mutex> lockEnvironmentRead();
 
   /** \brief Lock the scene for writing (only one thread can lock for writing and no other thread can lock for reading)
    */
-  void lockEnvironmentWrite();
-
-  /** \brief Lock the scene from writing (only one thread can lock for writing and no other thread can lock for reading)
-   */
-  void unlockEnvironmentWrite();
+  std::unique_lock<std::shared_mutex> lockEnvironmentWrite();
 
   void clearOctomap();
 
@@ -312,7 +308,7 @@ protected:
   ContinuousContactManagerPluginLoaderPtr continuous_manager_loader_;
 
   tesseract::Tesseract::Ptr tesseract_;
-  boost::shared_mutex scene_update_mutex_;  /// mutex for stored scene
+  std::shared_mutex scene_update_mutex_;  /// mutex for stored scene
   rclcpp::Time last_update_time_;           /// Last time the state was updated
   rclcpp::Time last_robot_motion_time_;     /// Last time the robot has moved
   bool enforce_next_state_update_;          /// flag to enforce immediate state update in onStateUpdate()
@@ -413,128 +409,11 @@ private:
   // Only access this from callback functions (and constructor)
   rclcpp::Time last_robot_state_update_wall_time_;
 
-  //  DynamicReconfigureImpl* reconfigure_impl_;
-
   rclcpp::callback_group::CallbackGroup::SharedPtr callback_group_;
 };
 typedef std::shared_ptr<EnvironmentMonitor> EnvironmentMonitorPtr;
 typedef std::shared_ptr<const EnvironmentMonitor> EnvironmentMonitorConstPtr;
 
-/** \brief This is a convenience class for obtaining access to an
- *         instance of a locked Environment.
- *
- * Instances of this class can be used almost exactly like instances
- * of a ROSBasicEnvPtr because of the typecast operator and
- * "operator->" functions.  Therefore you will often see code like this:
- * @code
- *   environment_monitor::LockedEnvironmentRO ls(environment_monitor);
- *   const tesseract_ros::ROSBasicEnvPtr& env = ls->getEnvironment();
- * @endcode
-
- * The function "getEnvironment()" is a member of EnvironmentMonitor and not
- * a member of this class.  However because of the "operator->" here
- * which returns a ROSBasicEnvConstPtr, this works.
- *
- * Any number of these "ReadOnly" locks can exist at a given time.
- * The intention is that users which only need to read from the
- * ROSBasicEnvPtr will use these and will thus not interfere with each
- * other.
- *
- * @see LockedEnvironmentRW */
-class LockedEnvironmentRO
-{
-public:
-  LockedEnvironmentRO(const EnvironmentMonitorPtr& environment_monitor) : env_monitor_(environment_monitor)
-  {
-    initialize(true);
-  }
-
-  const EnvironmentMonitorPtr& getEnvironmentMonitor() { return env_monitor_; }
-  operator bool() const { return env_monitor_ && env_monitor_->getEnvironment(); }
-  operator const tesseract_environment::Environment::ConstPtr&() const
-  {
-    return static_cast<const EnvironmentMonitor*>(env_monitor_.get())->getEnvironment();
-  }
-
-  const tesseract_environment::Environment::ConstPtr& operator->() const
-  {
-    return static_cast<const EnvironmentMonitor*>(env_monitor_.get())->getEnvironment();
-  }
-
-protected:
-  LockedEnvironmentRO(const EnvironmentMonitorPtr& environment_monitor, bool read_only)
-    : env_monitor_(environment_monitor)
-  {
-    initialize(read_only);
-  }
-
-  void initialize(bool read_only)
-  {
-    if (env_monitor_)
-      lock_.reset(new SingleUnlock(env_monitor_.get(), read_only));
-  }
-
-  // we use this struct so that lock/unlock are called only once
-  // even if the LockedPlanningScene instance is copied around
-  struct SingleUnlock
-  {
-    SingleUnlock(EnvironmentMonitor* environment_monitor, bool read_only)
-      : env_monitor_(environment_monitor), read_only_(read_only)
-    {
-      if (read_only)
-        env_monitor_->lockEnvironmentRead();
-      else
-        env_monitor_->lockEnvironmentWrite();
-    }
-    ~SingleUnlock()
-    {
-      if (read_only_)
-        env_monitor_->unlockEnvironmentRead();
-      else
-        env_monitor_->unlockEnvironmentWrite();
-    }
-    EnvironmentMonitor* env_monitor_;
-    bool read_only_;
-  };
-  typedef std::shared_ptr<SingleUnlock> SingleUnlockPtr;
-  typedef std::shared_ptr<const SingleUnlock> SingleUnlockConstPtr;
-
-  EnvironmentMonitorPtr env_monitor_;
-  SingleUnlockPtr lock_;
-};
-
-/** \brief This is a convenience class for obtaining access to an
- *         instance of a locked Environment.
- *
- * Instances of this class can be used almost exactly like instances
- * of a EnvironmentMonitorPtr because of the typecast operator and
- * "operator->" functions.  Therefore you will often see code like this:
- * @code
- *   environment_monitor::LockedEnvironmentRW ls(environment_monitor);
- *   const tesseract_ros::ROSBasicEnvPtr& env = ls->getEnvironment();
- * @endcode
-
- * The function "getEnvironment()" is a member of EnvironmentMonitor and not
- * a member of this class.  However because of the "operator->" here
- * which returns a ROSBasicEnvPtr, this works.
- *
- * Only one of these "ReadWrite" locks can exist at a given time.  The
- * intention is that users which need to write to the ROSBasicEnv
- * will use these, preventing other writers and readers from locking
- * the same PlanningScene at the same time.
- *
- * @see LockedEnvironmentRO */
-class LockedEnvironmentRW : public LockedEnvironmentRO
-{
-public:
-  LockedEnvironmentRW(const EnvironmentMonitorPtr& environment_monitor)
-    : LockedEnvironmentRO(environment_monitor, false)
-  {
-  }
-
-  operator const tesseract_environment::Environment::Ptr&() { return env_monitor_->getEnvironment(); }
-  const tesseract_environment::Environment::Ptr& operator->() { return env_monitor_->getEnvironment(); }
-};
 }  // namespace tesseract_monitoring
 
 #endif
