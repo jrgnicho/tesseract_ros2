@@ -12,6 +12,11 @@ uint8 ADD_ALLOWED_COLLISION=9
 uint8 REMOVE_ALLOWED_COLLISION=10
 uint8 REMOVE_ALLOWED_COLLISION_LINK=11
 uint8 UPDATE_JOINT_STATE=12
+uint8 ADD_SCENE_GRAPH=13
+uint8 CHANGE_JOINT_POSITION_LIMITS=14
+uint8 CHANGE_JOINT_VELOCITY_LIMITS=15
+uint8 CHANGE_JOINT_ACCELERATION_LIMITS=16
+uint8 ADD_KINEMATICS_INFORMATION=17
 
 # Specifies the type of command. Dictates which of the fields below are used
 uint8 command
@@ -60,3 +65,20 @@ string remove_allowed_collision_link
 
 # UPDATE_JOINT_STATE
 sensor_msgs/JointState joint_state
+
+# ADD_SCENE_GRAPH Command
+tesseract_msgs/SceneGraph scene_graph
+tesseract_msgs/Joint scene_graph_joint
+string scene_graph_prefix
+
+# CHANGE_JOINT_POSITION_LIMITS Command
+tesseract_msgs/StringLimitsPair[] change_joint_position_limits
+
+# CHANGE_JOINT_VELOCITY_LIMITS Command
+tesseract_msgs/StringDoublePair[] change_joint_velocity_limits
+
+# CHANGE_JOINT_ACCELERATION_LIMITS Command
+tesseract_msgs/StringDoublePair[] change_joint_acceleration_limits
+
+# ADD_KINEMATICS_INFORMATION Command
+tesseract_msgs/KinematicsInformation add_kinematics_information
