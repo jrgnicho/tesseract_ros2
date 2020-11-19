@@ -60,7 +60,7 @@ namespace tesseract_monitoring
 //}
 
 CurrentStateMonitor::CurrentStateMonitor(const tesseract_environment::Environment::ConstPtr& env,
-                                         tesseract::ManipulatorManager::ConstPtr manipulator_manager,
+                                         tesseract_environment::ManipulatorManager::ConstPtr manipulator_manager,
                                          rclcpp::Node::SharedPtr node)
   : node_(node)
   , env_(env)
