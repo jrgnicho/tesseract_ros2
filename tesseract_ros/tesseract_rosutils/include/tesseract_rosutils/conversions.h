@@ -3,14 +3,13 @@
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
-#include <tesseract_motion_planners/core/waypoint.h>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <tf2_eigen/tf2_eigen.h>
-#include <tesseract_process_planners/process_definition.h>
-#include <tesseract_process_planners/process_planner.h>
+//#include <tesseract_process_planners/process_definition.h>
+//#include <tesseract_process_planners/process_planner.h>
 #include <iostream>
 #include <fstream>
 
@@ -74,77 +73,6 @@ inline Eigen::MatrixXd toEigen(const trajectory_msgs::msg::JointTrajectory& join
   return trajectory;
 }
 
-/**
- * @brief Convert a cartesian pose to cartesian waypoint.
- * @param pose The cartesian pose
- * @param change_base A tranformation applied to the pose = change_base * pose
- * @return Waypoint::Ptr
- */
-inline tesseract_motion_planners::Waypoint::Ptr
-toWaypoint(const geometry_msgs::msg::Pose& pose, Eigen::Isometry3d change_base = Eigen::Isometry3d::Identity())
-{
-  Eigen::Isometry3d pose_eigen;
-  tf2::fromMsg(pose, pose_eigen);
-  return std::make_shared<tesseract_motion_planners::CartesianWaypoint>(change_base * pose_eigen);
-}
-
-/**
- * @brief Convert a vector of cartesian poses to vector of cartesian waypoints
- * @param poses The vector of cartesian poses
- * @param change_base A tranformation applied to the pose = change_base * pose
- * @return std::vector<Waypoint::Ptr>
- */
-inline std::vector<tesseract_motion_planners::Waypoint::Ptr>
-toWaypoint(const std::vector<geometry_msgs::msg::Pose>& poses,
-           Eigen::Isometry3d change_base = Eigen::Isometry3d::Identity())
-{
-  std::vector<tesseract_motion_planners::Waypoint::Ptr> waypoints;
-  waypoints.reserve(poses.size());
-  for (const auto& pose : poses)
-    waypoints.push_back(toWaypoint(pose, change_base));
-
-  return waypoints;
-}
-
-/**
- * @brief Convert a list of vector of cartesian poses to list of vector of cartesian waypoints
- * @param pose_arrays The list of vector of cartesian poses
- * @param change_base A tranformation applied to the pose = change_base * pose
- * @return std::vector<std::vector<Waypoint::Ptr>>
- */
-inline std::vector<std::vector<tesseract_motion_planners::Waypoint::Ptr>>
-toWaypoint(const std::vector<geometry_msgs::msg::PoseArray>& pose_arrays,
-           Eigen::Isometry3d change_base = Eigen::Isometry3d::Identity())
-{
-  std::vector<std::vector<tesseract_motion_planners::Waypoint::Ptr>> paths;
-  paths.reserve(pose_arrays.size());
-  for (const auto& pose_array : pose_arrays)
-    paths.push_back(toWaypoint(pose_array.poses, change_base));
-
-  return paths;
-}
-
-/**
- * @brief Convert a vector of double to joint waypoint
- * @param pose The joint positions
- * @return WaypointPtr
- */
-inline tesseract_motion_planners::Waypoint::Ptr toWaypoint(const std::vector<double>& pose,
-                                                           const std::vector<std::string>& names)
-{
-  return std::make_shared<tesseract_motion_planners::JointWaypoint>(toEigen(pose), names);
-}
-
-inline tesseract_motion_planners::Waypoint::Ptr toWaypoint(const sensor_msgs::msg::JointState& joint_state)
-{
-  assert(joint_state.name.size() == joint_state.position.size());
-  std::vector<std::string> joint_names = joint_state.name;
-  Eigen::VectorXd joint_positions(joint_state.position.size());
-  for (long i = 0; i < static_cast<long>(joint_state.position.size()); ++i)
-    joint_positions[i] = joint_state.position[static_cast<size_t>(i)];
-
-  return std::make_shared<tesseract_motion_planners::JointWaypoint>(joint_positions, joint_names);
-}
 
 /**
  * @brief Convert a vector of waypoints into a pose array

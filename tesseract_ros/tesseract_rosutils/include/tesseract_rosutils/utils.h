@@ -52,6 +52,7 @@ TESSERACT_COMMON_IGNORE_WARNINGS_PUSH
 #include <tesseract_msgs/msg/joint_limits.hpp>
 #include <tesseract_msgs/msg/joint_mimic.hpp>
 #include <tesseract_msgs/msg/joint_safety.hpp>
+#include <tesseract_msgs/msg/kinematics_information.hpp>
 #include <tesseract_msgs/msg/scene_graph.hpp>
 #include <tesseract_msgs/msg/tesseract_init_info.hpp>
 
@@ -1442,14 +1443,117 @@ inline bool processMsg(tesseract_environment::Environment& env, const sensor_msg
   return false;
 }
 
+/**
+ * @brief This will populate the kinematics information from the kinematics information message
+ * @param kin_info The kinematics information data structure to populate
+ * @param kin_info_msg The kinematics information message
+ * @return True if successful, otherwise false
+ */
+inline bool fromMsg(tesseract_scene_graph::KinematicsInformation& kin_info,
+             const tesseract_msgs::msg::KinematicsInformation& kin_info_msg)
+{
+  kin_info.group_names = kin_info_msg.group_names;
+
+  for (const auto& group : kin_info_msg.chain_groups)
+  {
+    tesseract_scene_graph::ChainGroup chain_group;
+    for (const auto& pair : group.chains)
+      chain_group.emplace_back(pair.first, pair.second);
+
+    kin_info.chain_groups[group.name] = chain_group;
+  }
+
+  for (const auto& group : kin_info_msg.joint_groups)
+    kin_info.joint_groups[group.name] = group.joints;
+
+  for (const auto& group : kin_info_msg.link_groups)
+    kin_info.link_groups[group.name] = group.links;
+
+  for (const auto& group : kin_info_msg.group_rop)
+  {
+    tesseract_scene_graph::ROPKinematicParameters rop_group;
+    rop_group.manipulator_group = group.manipulator_group;
+    rop_group.manipulator_ik_solver = group.manipulator_ik_solver;
+    rop_group.manipulator_reach = group.manipulator_reach;
+    rop_group.positioner_group = group.positioner_group;
+    rop_group.positioner_fk_solver = group.positioner_fk_solver;
+    for (const auto& pair : group.positioner_sample_resolution)
+      rop_group.positioner_sample_resolution[pair.first] = pair.second;
+
+    kin_info.group_rop_kinematics[group.name] = rop_group;
+  }
+
+  for (const auto& group : kin_info_msg.group_rep)
+  {
+    tesseract_scene_graph::REPKinematicParameters rep_group;
+    rep_group.manipulator_group = group.manipulator_group;
+    rep_group.manipulator_ik_solver = group.manipulator_ik_solver;
+    rep_group.manipulator_reach = group.manipulator_reach;
+    rep_group.positioner_group = group.positioner_group;
+    rep_group.positioner_fk_solver = group.positioner_fk_solver;
+    for (const auto& pair : group.positioner_sample_resolution)
+      rep_group.positioner_sample_resolution[pair.first] = pair.second;
+
+    kin_info.group_rep_kinematics[group.name] = rep_group;
+  }
+
+  for (const auto& group : kin_info_msg.group_opw)
+  {
+    tesseract_scene_graph::OPWKinematicParameters opw_group;
+    opw_group.a1 = group.a1;
+    opw_group.a2 = group.a2;
+    opw_group.b = group.b;
+    opw_group.c1 = group.c1;
+    opw_group.c2 = group.c2;
+    opw_group.c3 = group.c3;
+    opw_group.c4 = group.c4;
+    for (std::size_t i = 0; i < 6; ++i)
+    {
+      opw_group.offsets[i] = group.offsets[i];
+      opw_group.sign_corrections[i] = group.sign_corrections[i];
+    }
+
+    kin_info.group_opw_kinematics[group.name] = opw_group;
+  }
+
+  for (const auto& group : kin_info_msg.group_joint_states)
+  {
+    for (const auto& state : group.joint_states)
+    {
+      tesseract_scene_graph::GroupsJointState joint_state;
+      joint_state.reserve(state.joint_state.size());
+      for (const auto& js : state.joint_state)
+        joint_state[js.first] = js.second;
+
+      kin_info.group_states[group.name][state.name] = joint_state;
+    }
+  }
+
+  for (const auto& group : kin_info_msg.group_tcps)
+  {
+    for (const auto& pose : group.tcps)
+    {
+      Eigen::Isometry3d tcp{ Eigen::Isometry3d::Identity() };
+      tf2::fromMsg(pose.tcp, tcp);
+      kin_info.group_tcps[group.name][pose.name] = tcp;
+    }
+  }
+
+  for (const auto& d : kin_info_msg.default_fwd_kin)
+    kin_info.group_default_fwd_kin[d.first] = d.second;
+
+  for (const auto& d : kin_info_msg.default_inv_kin)
+    kin_info.group_default_inv_kin[d.first] = d.second;
+
+  return true;
+}
+
 inline bool processMsg(tesseract_environment::Environment& env,
-                       const std::vector<tesseract_msgs::msg::EnvironmentCommand>& env_command_msg,
-                       const int& past_revision = 0)
+                       const std::vector<tesseract_msgs::msg::EnvironmentCommand>& env_command_msg)
 {
   bool success = true;
-  for (int i = past_revision; i < env_command_msg.size(); i++)
+  for (const auto& command : env_command_msg)
   {
-    const auto& command = env_command_msg[i];
     switch (command.command)
     {
       case tesseract_msgs::msg::EnvironmentCommand::ADD:
@@ -1530,6 +1634,51 @@ inline bool processMsg(tesseract_environment::Environment& env,
         success &= processMsg(env, command.joint_state);
         break;
       }
+      case tesseract_msgs::msg::EnvironmentCommand::ADD_SCENE_GRAPH:
+      {
+        tesseract_scene_graph::SceneGraph g = fromMsg(command.scene_graph);
+        if (command.scene_graph_joint.type == tesseract_msgs::msg::Joint::UNKNOWN)
+          success &= env.addSceneGraph(g, command.scene_graph_prefix);
+        else
+          success &= env.addSceneGraph(g, fromMsg(command.scene_graph_joint), command.scene_graph_prefix);
+
+        break;
+      }
+      case tesseract_msgs::msg::EnvironmentCommand::CHANGE_JOINT_POSITION_LIMITS:
+      {
+        std::unordered_map<std::string, std::pair<double, double>> limits_map;
+        for (const auto& l : command.change_joint_position_limits)
+          limits_map[l.first] = std::make_pair(l.second[0], l.second[1]);
+
+        success &= env.changeJointPositionLimits(limits_map);
+        break;
+      }
+      case tesseract_msgs::msg::EnvironmentCommand::CHANGE_JOINT_VELOCITY_LIMITS:
+      {
+        std::unordered_map<std::string, double> limits_map;
+        for (const auto& l : command.change_joint_velocity_limits)
+          limits_map[l.first] = l.second;
+
+        success &= env.changeJointVelocityLimits(limits_map);
+        break;
+      }
+      case tesseract_msgs::msg::EnvironmentCommand::CHANGE_JOINT_ACCELERATION_LIMITS:
+      {
+        std::unordered_map<std::string, double> limits_map;
+        for (const auto& l : command.change_joint_acceleration_limits)
+          limits_map[l.first] = l.second;
+
+        success &= env.changeJointAccelerationLimits(limits_map);
+        break;
+      }
+      case tesseract_msgs::msg::EnvironmentCommand::ADD_KINEMATICS_INFORMATION:
+      {
+        tesseract_scene_graph::KinematicsInformation kin_info;
+        fromMsg(kin_info, command.add_kinematics_information);
+
+        success &= env.addKinematicsInformation(kin_info);
+        break;
+      }
     }
   }
 
@@ -1550,7 +1699,7 @@ inline bool processMsg(tesseract_environment::Environment& env, const tesseract_
   if (env.getRevision() > state_msg.revision)
     return false;
 
-  if (!processMsg(env, state_msg.commands, env.getRevision()))
+  if (!processMsg(env, state_msg.commands))
     return false;
 
   if (!processMsg(env, state_msg.joint_state))
